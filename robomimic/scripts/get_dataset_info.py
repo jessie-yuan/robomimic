@@ -122,6 +122,9 @@ if __name__ == "__main__":
             elif isinstance(f["data/{}/{}".format(ep, k)], h5py.Dataset):
                 key_shape = f["data/{}/{}".format(ep, k)].shape
                 print("    key: {} with shape {}".format(k, key_shape))
+        print("actions: {}".format(f["data/{}/actions".format(ep)]))
+        print("eef_pos: {}".format(f["data/{}/obs/robot0_eef_pos".format(ep)]))
+        print("eef_quat: {}".format(f["data/{}/obs/robot0_eef_quat".format(ep)]))
 
         if not args.verbose:
             break
