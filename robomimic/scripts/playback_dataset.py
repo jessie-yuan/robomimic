@@ -67,6 +67,7 @@ import h5py
 import argparse
 import imageio
 import numpy as np
+import cv2
 
 import robomimic
 import robomimic.utils.obs_utils as ObsUtils
@@ -89,11 +90,14 @@ def playback_trajectory_with_env(
     initial_state, 
     states, 
     actions=None, 
+    observations=None,
     render=False, 
     video_writer=None, 
     video_skip=5, 
     camera_names=None,
     first=False,
+    label_demos=False,
+    demo_num=None,
 ):
     """
     Helper function to playback a single trajectory using the simulator environment.
@@ -129,7 +133,7 @@ def playback_trajectory_with_env(
 
     for i in range(traj_len):
         if action_playback:
-            env.step(actions[i])
+            obs, _, _, _ = env.step(actions[i])
             if i < traj_len - 1:
                 # check whether the actions deterministically lead to the same recorded states
                 state_playback = env.get_state()["states"]
@@ -150,6 +154,18 @@ def playback_trajectory_with_env(
                 for cam_name in camera_names:
                     video_img.append(env.render(mode="rgb_array", height=512, width=512, camera_name=cam_name))
                 video_img = np.concatenate(video_img, axis=1) # concatenate horizontally
+                if label_demos and demo_num is not None:
+                    # add demo number to the video frame
+                    video_img = cv2.putText(
+                        video_img, 
+                        "Demo {}".format(demo_num), 
+                        (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (255, 255, 255), 
+                        2, 
+                        cv2.LINE_AA,
+                    )
                 video_writer.append_data(video_img)
             video_count += 1
 
@@ -187,6 +203,8 @@ def playback_trajectory_with_obs(
         depth_max = { k : traj_grp["obs/{}".format(k)][:].max() for k in depth_names }
 
     traj_len = traj_grp["actions"].shape[0]
+    print("trajectory length: {}".format(traj_len))
+    print("obs shape: {}".format(traj_grp["obs/{}".format(image_names[0])].shape))
     for i in range(traj_len):
         if video_count % video_skip == 0:
             # concatenate image obs together
@@ -288,15 +306,20 @@ def playback_dataset(args):
         if args.use_actions:
             actions = f["data/{}/actions".format(ep)][()]
 
+        observations = f["data/{}/obs".format(ep)]['robot0_eef_pos']
+
         playback_trajectory_with_env(
             env=env, 
             initial_state=initial_state, 
             states=states, actions=actions, 
+            observations=observations,
             render=args.render, 
             video_writer=video_writer, 
             video_skip=args.video_skip,
             camera_names=args.render_image_names,
             first=args.first,
+            label_demos=args.label_demos,
+            demo_num=ind if args.label_demos else None,
         )
 
     f.close()
@@ -387,6 +410,12 @@ if __name__ == "__main__":
         "--first",
         action='store_true',
         help="use first frame of each episode",
+    )
+
+    parser.add_argument(
+        "--label-demos",
+        action='store_true',
+        help="if set, put the number of the demo on screen in the rendered video",
     )
 
     args = parser.parse_args()

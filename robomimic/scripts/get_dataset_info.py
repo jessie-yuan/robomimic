@@ -46,6 +46,11 @@ if __name__ == "__main__":
         action='store_true',
         help="verbose output",
     )
+    parser.add_argument(
+        "--report_labels",
+        action='store_true',
+        help="if set, report the labels of each demonstration in the dataset",
+    )
     args = parser.parse_args()
 
     # extract demonstration list from file
@@ -128,6 +133,28 @@ if __name__ == "__main__":
 
         if not args.verbose:
             break
+
+    if args.report_labels:
+        total_1s = 0
+        total_2s = 0
+        total_0s = 0
+        for ep in demos:
+            print("episode {} with {} transitions".format(ep, f["data/{}".format(ep)].attrs["num_samples"]))
+            label = f["data/{}".format(ep)].attrs["label"]
+            print("label: {}".format(label))
+            if label == 1:
+                total_1s += 1
+            elif label == 2:
+                total_2s += 1
+            elif label == 0:
+                total_0s += 1
+            else:
+                print("unknown label {}".format(label))
+
+        print("total 1s: {}".format(total_1s))
+        print("total 2s: {}".format(total_2s))
+        print("total 0s: {}".format(total_0s))
+
 
     f.close()
 

@@ -13,6 +13,9 @@ env = EnvRobosuite.create_for_data_processing(
 
 obs = env.reset()
 
+print("Observation keys:", obs.keys())
+print("object:", obs['object'])
+
 video_img = []
 for cam_name in ['agentview', 'robot0_eye_in_hand']:
     video_img.append(env.render(mode="rgb_array", height=84, width=84, camera_name=cam_name))

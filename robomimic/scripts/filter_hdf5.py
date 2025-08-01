@@ -71,16 +71,59 @@ def filter_demos(input_file, output_file, demos_to_remove):
     f_in.close()
     f_out.close()
 
-def get_demos_to_remove(labels_file):
-    with open(labels_file, 'r') as f:
-        lines = f.readlines()
+def get_demos_to_remove(labels_file, input_file, goal):
+    if labels_file is not None:
+        with open(labels_file, 'r') as f:
+            lines = f.readlines()
 
-    lines = [line.strip() for line in lines]
-    demos_to_remove = []
+        if goal == 'remove_backending':
+            lines = [line.strip() for line in lines]
+            lines = [line.split(',')[1] for line in lines]
+            demos_to_remove = []
 
-    for i, line in enumerate(lines):
-        if line == 'back':
-            demos_to_remove.append(i)
+            for i, line in enumerate(lines):
+                if line == 'back':
+                    demos_to_remove.append(i)
+
+        elif goal == 'keep_frontstarting_labels':
+            lines = [line.strip() for line in lines]
+            demos_to_remove = []
+
+            frontstarting_leftending = 0
+            frontstarting_rightending = 0
+
+            for i, line in enumerate(lines):
+                start, end = line.split(',')
+                if start != 'front':
+                    demos_to_remove.append(i)
+
+                else:
+                    if end == 'left':
+                        frontstarting_leftending += 1
+                    elif end == 'right':
+                        frontstarting_rightending += 1
+
+            print(f"Frontstarting leftending: {frontstarting_leftending}, rightending: {frontstarting_rightending}")
+
+    else:
+        if goal == 'keep_frontstarting_angle':
+            f_in = h5py.File(input_file, 'r')
+            demo_names = list(f_in["data"].keys())
+            demo_names = sorted(demo_names, key=lambda x: int(x.split('_')[1]))  # Sort by demo number
+            demos_to_remove = []
+
+            for i, demo_name in enumerate(demo_names):
+                nut = f_in["data"][demo_name]["obs"]["object"][0]
+                if nut[10] != 0. or nut[11] != 0.:
+                    print("somethings fishy.....")
+
+                rot_angle = 2 * np.arccos(nut[13])
+                print(f"Demo {i}: {demo_name}, rot_angle: {rot_angle}")
+                if rot_angle > 0.524 and rot_angle < 5.758:
+                    demos_to_remove.append(i)
+
+            f_in.close()
+            
 
     return demos_to_remove
 
@@ -89,7 +132,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Filter demos from HDF5 file')
     parser.add_argument('--input_file', help='Input HDF5 file path')
     parser.add_argument('--output_file', help='Output HDF5 file path')
-    parser.add_argument('--labels_file', help='Labels file path with demos to remove')
+    parser.add_argument('--labels_file', default=None, help='Labels file path with demos to remove')
+    parser.add_argument('--goal', choices=['remove_backending_labels', 'keep_frontstarting_angle', 'keep_frontstarting_labels'], required=True, 
+                        help='Goal for filtering demos: remove backending or keep frontstarting')
     
     args = parser.parse_args()
     
@@ -97,8 +142,8 @@ if __name__ == "__main__":
     if not Path(args.input_file).exists():
         print(f"Error: Input file '{args.input_file}' does not exist.")
 
-    if not Path(args.labels_file).exists():
-        print(f"Error: Labels file '{args.labels_file}' does not exist.")
+    # if not Path(args.labels_file).exists():
+    #     print(f"Error: Labels file '{args.labels_file}' does not exist.")
     
     # Validate output directory exists
     output_path = Path(args.output_file)
@@ -107,7 +152,7 @@ if __name__ == "__main__":
     print(f"Filtering demos from: {args.input_file}")
     print(f"Output file: {args.output_file}")
 
-    demos_to_remove = get_demos_to_remove(args.labels_file)
+    demos_to_remove = get_demos_to_remove(args.labels_file, args.input_file, args.goal)
 
     print(f"Demos to remove: {demos_to_remove}")
     

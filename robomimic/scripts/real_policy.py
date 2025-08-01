@@ -15,8 +15,8 @@ from collections import deque, defaultdict
 from scipy.spatial.transform import Rotation
 import cv2
 
-PRED_HORIZON = 16
-ACT_HORIZON = 8
+PRED_HORIZON = 208
+ACT_HORIZON = 208
 EXP_WEIGHT = 0
 GRIP_THRESH = 0.55
 
@@ -38,7 +38,7 @@ class RealPolicy:
     """
     A wrapper for using a robot policy on hardware
     """
-    def __init__(self, ckpt_dir, iteration = None, log=False, logger=None):
+    def __init__(self, ckpt_dir, ckpt_num, iteration = None, log=False, logger=None):
         torch.multiprocessing.set_start_method('spawn')
         agent_yaml_path = Path(ckpt_dir, "agent_config.yaml")
         exp_config_path = Path(ckpt_dir, "exp_config.yaml")
@@ -70,7 +70,8 @@ class RealPolicy:
             model_name = exp_config.params.exp_name
         else:
             model_name = exp_config.exp_name
-        load_dict = torch.load(Path(ckpt_dir, f"{model_name}.ckpt"))
+        # load_dict = torch.load(Path(ckpt_dir, f"{model_name}.ckpt"))
+        load_dict = torch.load(Path(ckpt_dir, f"checkpoints/step_{ckpt_num}.ckpt"))
 
         agent.load_state_dict(load_dict["model"])
 
@@ -147,11 +148,23 @@ class RealPolicy:
 
         if len(ac) == 7:
             ac = (ac+1)/2
-            ac = ac*(self.ac_max-self.ac_min)+ self.ac_min  
+            ac = ac*(self.ac_max - self.ac_min) + self.ac_min  
     
         assert len(ac) == 7, "Assuming 7d action dim!"
         
         return ac, None, None
+    
+    def get_action_seq(self, obs):
+        images, state = self._get_images_and_states(obs)
+        with torch.no_grad():
+            action = self.agent.get_actions(images, state)
+        ac_list = action[0].cpu().numpy().astype(np.float32)[:ACT_HORIZON]
+
+        #normalize all of ac_list
+        ac_list = (ac_list+1)/2
+        ac_list = ac_list*(self.ac_max - self.ac_min) + self.ac_min
+
+        return ac_list
 
     def reset_rollout(self):
         self.act_history = []

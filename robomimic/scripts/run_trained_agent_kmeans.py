@@ -86,7 +86,7 @@ from tslearn.preprocessing import TimeSeriesScalerMeanVariance
 from tslearn.clustering import TimeSeriesKMeans
 import cv2
 
-def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5, return_obs=False, camera_names=None, camera_height=96, camera_width=96, env_initial_state=None):
+def rollout(action_seq, env, horizon, render=False, video_writer=None, video_skip=5, return_obs=False, camera_names=None, camera_height=96, camera_width=96, env_initial_state=None):
     """
     Helper function to carry out rollouts. Supports on-screen rendering, off-screen rendering to a video, 
     and returns the rollout trajectory.
@@ -111,21 +111,12 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
 
     assert isinstance(env, EnvBase)
     assert not (render and (video_writer is not None))
+    assert len(action_seq) == horizon, "action_seq length must match the horizon"
 
-    if env_initial_state is None:
-        obs = env.reset()
-        state_dict = env.get_state()
+    state_dict = env_initial_state
+    obs = env.reset_to(state_dict)
 
-        # hack that is necessary for robosuite tasks for deterministic action playback
-        obs = env.reset_to(state_dict)
-        all_eef_pos = None
-    else:
-        state_dict = env_initial_state
-        obs = env.reset_to(state_dict)
-
-        all_eef_pos = [obs["robot0_eef_pos"]]
-
-    policy.reset_rollout()
+    all_eef_pos = [obs["robot0_eef_pos"]]
 
     results = {}
     video_count = 0  # video frame counter
@@ -137,11 +128,8 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
     try:
         for step_i in range(horizon):
 
-            # get action from policy
-            act, log, record = policy.get_action(obs)
-
             # play action
-            next_obs, r, done, _ = env.step(act)
+            next_obs, r, done, _ = env.step(action_seq[step_i])
 
             # compute reward
             total_reward += r
@@ -163,7 +151,7 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
                 all_eef_pos.append(next_obs["robot0_eef_pos"])
 
             # collect transition
-            traj["actions"].append(act)
+            traj["actions"].append(action_seq[step_i])
             traj["rewards"].append(r)
             traj["dones"].append(done)
             traj["states"].append(state_dict["states"])
@@ -221,6 +209,8 @@ def trajectory_clustering(trajs, n_clusters=6, random_state=0, time_series=True 
     """
     # Flatten each trajectory into a single vector (n_waypoints * dim_per_waypoint)
 
+    print("shape", np.shape(trajs))
+
     # Apply K-means clustering
     ## fork 0:3 4 cluster, chip 0:7, 2 cluster, cup kmeans, 2 cluster
     if time_series:
@@ -259,8 +249,69 @@ def trajectory_clustering(trajs, n_clusters=6, random_state=0, time_series=True 
     labels = kmeans.labels_
     return aggregated_trajs, modes_prob, labels
 
-
 def visualize_plans_w_agg(real_traj,aggregated_traj=None, mode_probs = None, labels = None, current_pose=None):
+
+      
+        ## plot them in 3d space with matplotlib
+        fig = make_subplots(rows=1, cols=1,subplot_titles=("Origin"),specs = [[{"type": "scatter3d"}]])
+        colormap = sns.color_palette("pastel")# Paired
+        hex_palette = []
+        for k, color in enumerate(colormap):
+            if k > 7:
+                break
+            # print('k/len(colormap)', k/7)
+            hex_palette.append(f'rgb({int(color[0]*255)} ,{int(color[1]*255)} ,{int(color[2]*255)})')
+        colormap = sns.color_palette("muted")
+        for k, color in enumerate(colormap):
+            if k > 7:
+                break
+            hex_palette.append(f'rgb({int(color[0]*255)} ,{int(color[1]*255)} ,{int(color[2]*255)})')
+        label_to_color = {label: hex_palette[k] for k, label in enumerate(range(16))}
+        if current_pose is not None:
+            pos_list = np.array([current_pose])
+            fig.add_trace(go.Scatter3d(x=pos_list[:,0], y=pos_list[:,1], z=pos_list[:,2], 
+                                             mode='markers',
+                                                marker=dict(size=5, color='black'),
+                                                name=f'current_pose'), row=1, col=1)
+        for j in range(len(real_traj)):
+          
+            
+            # else:
+                # colormap = ListedColormap(sns.color_palette('viridis').as_hex())
+            traj = real_traj[j]
+        
+            pos_list = np.array(traj)
+            color_label = label_to_color[labels[j]]#j/len(real_traj)
+            # print('color', color)
+            fig.add_trace(go.Scatter3d(x=pos_list[:-3,0], y=pos_list[:-3,1], z=pos_list[:-3,2],
+                                            mode='markers', 
+                                           marker=dict(size=5, color=color_label), 
+                                           name=f'traj_{j}'), row=1, col=1)
+        
+        # label_to_color = {label: hex_palette[k] for k, label in enumerate(set(labels))}
+        
+        for j in range(len(aggregated_traj)):
+            pos_list = np.array(aggregated_traj[j])
+            color_label  = label_to_color[j+8]#hex_palette[j]
+            # if j == 0:
+            #     color_name = 'black'
+            # elif j == 1:
+            #     color_name = 'white'
+            # elif j == 2:
+            #     color_name = 'grey', current_pose=env.get_observation()['robot0_eef_pos']
+            # else: 
+            #     color_name = 'lightgoldenrodyellow'
+           
+            fig.add_trace(go.Scatter3d(x=pos_list[:-3,0], y=pos_list[:-3,1], z=pos_list[:-3,2], 
+                                           mode='markers', 
+                                           marker=dict(size=5, color=color_label),
+                                           name=f'aggregated_traj_{j}_{mode_probs[j]}'), row=1, col=1)
+            #
+     
+        return fig
+
+
+def visualize_eofpos(real_traj,aggregated_traj=None, mode_probs = None, labels = None, current_pose=None):
 
       
     ## plot them in 3d space with matplotlib
@@ -336,7 +387,6 @@ def run_trained_agent(args):
     policy = RealPolicy(args.checkpoint_dir, args.checkpoint_num)
 
     # read rollout settings
-    rollout_num_episodes = args.n_rollouts
     rollout_horizon = args.horizon
     if rollout_horizon is None:
         rollout_horizon = 200
@@ -386,16 +436,24 @@ def run_trained_agent(args):
 
     rollout_stats = []
 
-    if args.fixed_initial_state:
-        env.reset()
-        initial_state_dict = env.get_state()
-    else:
-        initial_state_dict = None
+    env.reset()
+    initial_state_dict = env.get_state()
 
     all_eef_pos_dfs = []
 
+    all_action_seqs = []
+    obs = env.get_observation()
+
+    for i in range(args.n_samples):
+        all_action_seqs.append(policy.get_action_seq(obs))
+
+    aggregated_trajs, modes_prob, labels = trajectory_clustering(all_action_seqs, n_clusters=args.n_clusters, random_state=0, time_series=True)
+
+    print("modes_prob", modes_prob)
+    print("labels", labels)
+
     # for i in range(rollout_num_episodes):
-    for i in tqdm(range(rollout_num_episodes), desc="Running Rollouts"):
+    for i in tqdm(range(args.n_clusters), desc="Running aggregated rollouts"):
 
         # # maybe create video writer
         # video_writer = None
@@ -403,7 +461,7 @@ def run_trained_agent(args):
         #     video_writer = imageio.get_writer(args.video_path, fps=20)
 
         stats, traj, eef_pos_df = rollout(
-            policy=policy, 
+            action_seq=aggregated_trajs[i], 
             env=env, 
             horizon=rollout_horizon, 
             render=args.render, 
@@ -482,8 +540,8 @@ def run_trained_agent(args):
         #                     title=f'eef pos over time for {rollout_num_episodes} rollouts',)
 
         # fig.show()
-        fig = visualize_plans_w_agg(all_eef_pos_dfs)
-        fig.update_layout(title=f'eef pos over time for {rollout_num_episodes} rollouts')
+        fig = visualize_plans_w_agg(all_action_seqs, aggregated_traj=aggregated_trajs, mode_probs=modes_prob, labels=labels, current_pose=None)
+        fig.update_layout(title=f'eef pos over time for {args.n_clusters} rollouts')
         fig.write_html("/home/jzyuan/uncertainty_aware_steering/robomimic/robomimic/scripts/eef_pos_over_time.html")
 
 
@@ -501,17 +559,24 @@ if __name__ == "__main__":
 
     # number of rollouts
     parser.add_argument(
-        "--n_rollouts",
+        "--n_samples",
         type=int,
-        default=27,
-        help="number of rollouts",
+        default=100,
+        help="number of trajectories to sample from the policy",
+    )
+
+    parser.add_argument(
+        "--n_clusters",
+        type=int,
+        default=6,
+        help="number of clusters for k-means",
     )
 
     # maximum horizon of rollout, to override the one stored in the model checkpoint
     parser.add_argument(
         "--horizon",
         type=int,
-        default=None,
+        default=208,
         help="(optional) override maximum horizon of rollout from the one in the checkpoint",
     )
 
@@ -578,11 +643,6 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help="(optional) set seed for rollouts",
-    )
-
-    parser.add_argument(
-        "--fixed_initial_state",
-        action='store_true',
     )
 
     parser.add_argument(

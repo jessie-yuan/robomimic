@@ -69,18 +69,24 @@ from robomimic.envs.env_base import EnvBase
 from robomimic.envs.env_robosuite import EnvRobosuite
 from robomimic.algo import RolloutPolicy
 from robomimic.scripts.real_policy import RealPolicy
+import robomimic.utils.env_utils as EnvUtils
 
-from pathlib import Path
-import time
+from tqdm import tqdm
+import pandas as pd
+import plotly.express as px
+
+import seaborn as sns
+from matplotlib.colors import ListedColormap
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from tslearn.preprocessing import TimeSeriesScalerMeanVariance
+from tslearn.clustering import TimeSeriesKMeans
 import cv2
-import hydra
-import yaml
-import os
-from collections import deque
-from scipy.spatial.transform import Rotation as R
 
-
-def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5, return_obs=False, camera_names=None, camera_height=84, camera_width=84):
+def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5, return_obs=False, camera_names=None, camera_height=96, camera_width=96, env_initial_state=None):
     """
     Helper function to carry out rollouts. Supports on-screen rendering, off-screen rendering to a video, 
     and returns the rollout trajectory.
@@ -106,11 +112,15 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
     assert isinstance(env, EnvBase)
     assert not (render and (video_writer is not None))
 
-    obs = env.reset()
-    state_dict = env.get_state()
+    if env_initial_state is None:
+        obs = env.reset()
+        state_dict = env.get_state()
 
-    # hack that is necessary for robosuite tasks for deterministic action playback
-    obs = env.reset_to(state_dict)
+        # hack that is necessary for robosuite tasks for deterministic action playback
+        obs = env.reset_to(state_dict)
+    else:
+        state_dict = env_initial_state
+        obs = env.reset_to(state_dict)
 
     policy.reset_rollout()
 
@@ -155,8 +165,10 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
                 # Note: We need to "unprocess" the observations to prepare to write them to dataset.
                 #       This includes operations like channel swapping and float to uint8 conversion
                 #       for saving disk space.
-                traj["obs"].append(ObsUtils.unprocess_obs_dict(obs))
-                traj["next_obs"].append(ObsUtils.unprocess_obs_dict(next_obs))
+                # traj["obs"].append(ObsUtils.unprocess_obs_dict(obs))
+                # traj["next_obs"].append(ObsUtils.unprocess_obs_dict(next_obs))
+                traj["obs"].append(obs)
+                traj["next_obs"].append(next_obs)
 
             # break if done or if success
             if done or success:
@@ -188,36 +200,50 @@ def rollout(policy, env, horizon, render=False, video_writer=None, video_skip=5,
 
     return stats, traj
 
-
 def run_trained_agent(args):
     # some arg checking
     write_video = (args.video_path is not None)
     assert not (args.render and write_video) # either on-screen or video but not both
-    if args.render:
-        # on-screen rendering can only support one camera
-        assert len(args.camera_names) == 1
+    # if args.render:
+    #     # on-screen rendering can only support one camera
+    #     assert len(args.camera_names) == 1
 
     # device
     device = TorchUtils.get_torch_device(try_to_use_cuda=True)
 
     # restore policy
-    policy = RealPolicy(args.checkpoint)
+    policy = RealPolicy(args.checkpoint_dir, args.checkpoint_num)
 
     # read rollout settings
-    rollout_num_episodes = args.n_rollouts
     rollout_horizon = args.horizon
     if rollout_horizon is None:
         rollout_horizon = 200
 
-    env = EnvRobosuite.create_for_data_processing(
-        env_name="NutAssemblySquare",
-        camera_names=args.camera_names,
-        camera_height=84,
-        camera_width=84,
+    env_meta = FileUtils.get_env_metadata_from_dataset('/home/jzyuan/uncertainty_aware_steering/robomimic/datasets/square/my_demos/startback_endright.hdf5')
+
+    abs_env_meta = deepcopy(env_meta)
+    abs_env_meta['env_kwargs']['controller_configs']['body_parts']['right']['input_type'] = 'absolute'
+
+    env = EnvUtils.create_env_for_data_processing(
+        env_meta=abs_env_meta,
+        camera_names=args.camera_names, 
+        camera_height=96, 
+        camera_width=96, 
         reward_shaping=False,
+        use_depth_obs=False,
         render=args.render,
         render_offscreen=(args.video_path is not None), 
-        robots=["Panda"],)
+    )
+
+    # env = EnvRobosuite.create_for_data_processing(
+    #     env_name="NutAssemblySquare",
+    #     camera_names=args.camera_names,
+    #     camera_height=96,
+    #     camera_width=96,
+    #     reward_shaping=False,
+    #     render=args.render,
+    #     render_offscreen=(args.video_path is not None), 
+    #     robots=["Panda"],)
 
     # maybe set seed
     if args.seed is not None:
@@ -237,40 +263,63 @@ def run_trained_agent(args):
         total_samples = 0
 
     rollout_stats = []
-    for i in range(rollout_num_episodes):
-        stats, traj = rollout(
-            policy=policy, 
-            env=env, 
-            horizon=rollout_horizon, 
-            render=args.render, 
-            video_writer=video_writer, 
-            video_skip=args.video_skip, 
-            return_obs=(write_dataset and args.dataset_obs),
-            camera_names=args.camera_names,
-        )
-        rollout_stats.append(stats)
 
-        if write_dataset:
-            # store transitions
-            ep_data_grp = data_grp.create_group("demo_{}".format(i))
-            ep_data_grp.create_dataset("actions", data=np.array(traj["actions"]))
-            ep_data_grp.create_dataset("states", data=np.array(traj["states"]))
-            ep_data_grp.create_dataset("rewards", data=np.array(traj["rewards"]))
-            ep_data_grp.create_dataset("dones", data=np.array(traj["dones"]))
-            if args.dataset_obs:
-                for k in traj["obs"]:
-                    ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
-                    ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]))
+    # for i in range(rollout_num_episodes):
+    for i in tqdm(range(args.n_start_states), desc="Running Rollouts"):
 
-            # episode metadata
-            if "model" in traj["initial_state_dict"]:
-                ep_data_grp.attrs["model_file"] = traj["initial_state_dict"]["model"] # model xml for this episode
-            ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
-            total_samples += traj["actions"].shape[0]
+        env.reset()
+        initial_state_dict = env.get_state()
+
+        for j in range(args.n_rollouts_per_state):
+
+            # # maybe create video writer
+            # video_writer = None
+            # if write_video:
+            #     video_writer = imageio.get_writer(args.video_path, fps=20)
+
+            stats, traj = rollout(
+                policy=policy, 
+                env=env, 
+                horizon=rollout_horizon, 
+                render=args.render, 
+                video_writer=video_writer, 
+                video_skip=args.video_skip, 
+                return_obs=(write_dataset and args.dataset_obs),
+                camera_names=args.camera_names,
+                env_initial_state=initial_state_dict,
+            )
+            rollout_stats.append(stats)
+
+            # if write_dataset and stats["Success_Rate"] == 0.0:
+            if write_dataset:
+                # store transitions
+                ep_data_grp = data_grp.create_group("demo_{}".format(i * args.n_rollouts_per_state + j))
+                ep_data_grp.create_dataset("actions", data=np.array(traj["actions"]))
+                ep_data_grp.create_dataset("states", data=np.array(traj["states"]))
+                ep_data_grp.create_dataset("rewards", data=np.array(traj["rewards"]))
+                ep_data_grp.create_dataset("dones", data=np.array(traj["dones"]))
+                if args.dataset_obs:
+                    for k in traj["obs"]:
+                        ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
+                        ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]))
+                # ep_data_grp.attrs["label"] = 0 
+
+                # episode metadata
+                if "model" in traj["initial_state_dict"]:
+                    ep_data_grp.attrs["model_file"] = traj["initial_state_dict"]["model"] # model xml for this episode
+                ep_data_grp.attrs["num_samples"] = traj["actions"].shape[0] # number of transitions in this episode
+                total_samples += traj["actions"].shape[0]
 
     rollout_stats = TensorUtils.list_of_flat_dict_to_dict_of_list(rollout_stats)
     avg_rollout_stats = { k : np.mean(rollout_stats[k]) for k in rollout_stats }
     avg_rollout_stats["Num_Success"] = np.sum(rollout_stats["Success_Rate"])
+    avg_rollout_stats["Median_Horizon"] = np.median(rollout_stats["Horizon"])
+    avg_rollout_stats["Mean_Successful_Horizon"] = np.mean(
+        [h for h, s in zip(rollout_stats["Horizon"], rollout_stats["Success_Rate"]) if s > 0]
+    )
+    avg_rollout_stats["Median_Successful_Horizon"] = np.median(
+        [h for h, s in zip(rollout_stats["Horizon"], rollout_stats["Success_Rate"]) if s > 0]
+    )
     print("Average Rollout Stats")
     print(json.dumps(avg_rollout_stats, indent=4))
 
@@ -285,12 +334,13 @@ def run_trained_agent(args):
         print("Wrote dataset trajectories to {}".format(args.dataset_path))
 
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Path to trained model
     parser.add_argument(
-        "--checkpoint",
+        "--checkpoint_dir",
         type=str,
         required=True,
         help="path to saved checkpoint pth file",
@@ -298,10 +348,18 @@ if __name__ == "__main__":
 
     # number of rollouts
     parser.add_argument(
-        "--n_rollouts",
+        "--n_rollouts_per_state",
         type=int,
         default=27,
         help="number of rollouts",
+    )
+
+    # number of start states
+    parser.add_argument(
+        "--n_start_states",
+        type=int,
+        default=1,
+        help="number of start states to sample from the dataset",
     )
 
     # maximum horizon of rollout, to override the one stored in the model checkpoint
@@ -375,6 +433,13 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help="(optional) set seed for rollouts",
+    )
+
+    parser.add_argument(
+        "--checkpoint_num",
+        type=int,
+        default=None,
+        help="which checkpoint to load",
     )
 
     args = parser.parse_args()

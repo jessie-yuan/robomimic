@@ -113,22 +113,22 @@ def extract_trajectory_with_downsampling(
     #     downsampled_actions.append(actions[-1])
 
     idxs_mask = np.tile([True, False], (len(actions) + 1) // 2)[:len(actions)]
-    # idxs_mask = np.ones(len(actions), dtype=bool)
+    # # idxs_mask = np.ones(len(actions), dtype=bool)
 
-    # make last 5 elements of idxs_mask True to get more precision when aligning peg w nut
-    idxs_mask[-30:] = True
+    # # make last 5 elements of idxs_mask True to get more precision when aligning peg w nut
+    # idxs_mask[-30:] = True
 
-    last_elements = actions[:, -1]  # Get last element of each sublist
-    switch_indices = np.where((last_elements[:-1] == -1) & (last_elements[1:] == 1))[0]
-    first_switch_index = switch_indices[0] + 1
+    # last_elements = actions[:, -1]  # Get last element of each sublist
+    # switch_indices = np.where((last_elements[:-1] == -1) & (last_elements[1:] == 1))[0]
+    # first_switch_index = switch_indices[0] + 1
 
-    # make 5 elements before the first switch index True
-    print("first switch index", first_switch_index)
-    idxs_mask[first_switch_index - 30 : first_switch_index + 30] = True
+    # # make 5 elements before the first switch index True
+    # print("first switch index", first_switch_index)
+    # idxs_mask[first_switch_index - 30 : first_switch_index + 30] = True
 
-    #count how many true elements before first switch index
-    num_true_before_switch = np.sum(idxs_mask[:first_switch_index])
-    print("num true before switch", num_true_before_switch)
+    # #count how many true elements before first switch index
+    # num_true_before_switch = np.sum(idxs_mask[:first_switch_index])
+    # print("num true before switch", num_true_before_switch)
 
     abs_actions = convert_actions(
         env=env, 
@@ -136,13 +136,15 @@ def extract_trajectory_with_downsampling(
         actions=np.array(actions),
     )
 
-    downsampled_actions = abs_actions[idxs_mask]
+    downsampled_actions = abs_actions[1::2]
+    if len(abs_actions) % 2 == 1:
+        downsampled_actions = np.append(downsampled_actions, abs_actions[-1][None, :], axis=0)
     # downsampled_actions = abs_actions[::2]
     # downsampled_actions = abs_actions[1::2]
     # if len(abs_actions) % 2 == 1:
     #     downsampled_actions = np.append(downsampled_actions, abs_actions[-1][None, :], axis=0)
 
-    downsampled_states = states[idxs_mask]
+    downsampled_states = states[::2]
     # downsampled_states = np.array(states)[::2]
     # for each element of states, divide the first entry by 2
     # downsampled_states[:, 0] /= 2.0
