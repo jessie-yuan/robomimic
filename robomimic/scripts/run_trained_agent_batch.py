@@ -290,8 +290,8 @@ def run_trained_agent(args):
             )
             rollout_stats.append(stats)
 
-            # if write_dataset and stats["Success_Rate"] == 0.0:
-            if write_dataset:
+            if write_dataset and stats["Success_Rate"] == 0.0:
+            # if write_dataset:
                 # store transitions
                 ep_data_grp = data_grp.create_group("demo_{}".format(i * args.n_rollouts_per_state + j))
                 ep_data_grp.create_dataset("actions", data=np.array(traj["actions"]))
@@ -302,7 +302,7 @@ def run_trained_agent(args):
                     for k in traj["obs"]:
                         ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(traj["obs"][k]))
                         ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(traj["next_obs"][k]))
-                # ep_data_grp.attrs["label"] = 0 
+                ep_data_grp.attrs["label"] = 0 
 
                 # episode metadata
                 if "model" in traj["initial_state_dict"]:

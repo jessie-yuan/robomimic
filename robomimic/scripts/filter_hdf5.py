@@ -3,7 +3,7 @@ import numpy as np
 import argparse
 from pathlib import Path
 
-def filter_demos(input_file, output_file, demos_to_remove):
+def filter_demos(input_file, output_file):
     """
     Filter out specified demo indices from an HDF5 file.
     
@@ -22,43 +22,52 @@ def filter_demos(input_file, output_file, demos_to_remove):
     demos = [demos[i] for i in inds]
     
     # Remove specified demos
-    filtered_indices = [i for i in inds if i not in demos_to_remove]
-    filtered_indices.sort()  # Keep them in order
+    # filtered_indices = [i for i in inds if i not in demos_to_remove]
+    # filtered_indices.sort()  # Keep them in order
     
     print(f"Original demos: {len(inds)}")
-    print(f"Demos to remove: {len(demos_to_remove)}")
-    print(f"Remaining demos: {len(filtered_indices)}")
-    print(f"Removed demo indices: {sorted(demos_to_remove)}")
+    # print(f"Demos to remove: {len(demos_to_remove)}")
+    # print(f"Remaining demos: {len(filtered_indices)}")
+    # print(f"Removed demo indices: {sorted(demos_to_remove)}")
 
     total_samples = 0
     
     # Copy filtered demos with new sequential naming
-    for new_idx, original_idx in enumerate(filtered_indices):
-        original_demo_key = f'demo_{original_idx}'
-        new_demo_key = f'demo_{new_idx}'
-        
-        ep_data_grp = data_grp.create_group(new_demo_key) 
-        
-        ep_data_grp.create_dataset("actions", data=np.array(f_in["data"][original_demo_key]["actions"]))
-        ep_data_grp.create_dataset("states", data=np.array(f_in["data"][original_demo_key]["states"]))
-        ep_data_grp.create_dataset("rewards", data=np.array(f_in["data"][original_demo_key]["rewards"]))
-        ep_data_grp.create_dataset("dones", data=np.array(f_in["data"][original_demo_key]["dones"]))
-        for k in f_in["data"][original_demo_key]["obs"]:
-            ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(f_in["data"][original_demo_key]["obs"][k]))
-        for k in f_in["data"][original_demo_key]["next_obs"]:
-            ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(f_in["data"][original_demo_key]["next_obs"][k]))
+    # for new_idx, original_idx in enumerate(filtered_indices):
+    new_idx = 0
+    for original_demo_key in demos:
+        if f_in["data"][original_demo_key].attrs['label'] == 0:
 
-        print(f_in["data"][original_demo_key].keys())
+            # original_demo_key = f'demo_{original_idx}'
+            new_demo_key = f'demo_{new_idx}'
+            
+            ep_data_grp = data_grp.create_group(new_demo_key) 
+            
+            ep_data_grp.create_dataset("actions", data=np.array(f_in["data"][original_demo_key]["actions"][:120]))
+            ep_data_grp.create_dataset("states", data=np.array(f_in["data"][original_demo_key]["states"][:120]))
+            ep_data_grp.create_dataset("rewards", data=np.array(f_in["data"][original_demo_key]["rewards"][:120]))
+            ep_data_grp.create_dataset("dones", data=np.array(f_in["data"][original_demo_key]["dones"][:120]))
+            for k in f_in["data"][original_demo_key]["obs"]:
+                ep_data_grp.create_dataset("obs/{}".format(k), data=np.array(f_in["data"][original_demo_key]["obs"][k][:120]))
+            for k in f_in["data"][original_demo_key]["next_obs"]:
+                ep_data_grp.create_dataset("next_obs/{}".format(k), data=np.array(f_in["data"][original_demo_key]["next_obs"][k][:120]))
 
-        # episode metadata
-        if "model_file" in f_in["data"][original_demo_key].attrs:
-            ep_data_grp.attrs["model_file"] = f_in["data"][original_demo_key].attrs["model_file"] # model xml for this episode
-        ep_data_grp.attrs["num_samples"] = f_in["data"][original_demo_key].attrs["num_samples"] # number of transitions in this episode
+            print(f_in["data"][original_demo_key].keys())
 
-        if "camera_info" in f_in["data"][original_demo_key].attrs:
-            ep_data_grp.attrs["camera_info"] = f_in["data"][original_demo_key].attrs["camera_info"]
+            # episode metadata
+            if "model_file" in f_in["data"][original_demo_key].attrs:
+                ep_data_grp.attrs["model_file"] = f_in["data"][original_demo_key].attrs["model_file"] # model xml for this episode
+            # ep_data_grp.attrs["num_samples"] = f_in["data"][original_demo_key].attrs["num_samples"] # number of transitions in this episode
+            ep_data_grp.attrs["num_samples"] = min(f_in["data"][original_demo_key].attrs["num_samples"], 120)
+            ep_data_grp.attrs["label"] = 5
 
-        total_samples += f_in["data"][original_demo_key].attrs["num_samples"]
+            if "camera_info" in f_in["data"][original_demo_key].attrs:
+                ep_data_grp.attrs["camera_info"] = f_in["data"][original_demo_key].attrs["camera_info"]
+
+            # total_samples += f_in["data"][original_demo_key].attrs["num_samples"]
+            total_samples += min(f_in["data"][original_demo_key].attrs["num_samples"], 120)
+
+            new_idx += 1
     
     # Update any metadata that might reference the number of demos
     if "mask" in f_in:
@@ -132,9 +141,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Filter demos from HDF5 file')
     parser.add_argument('--input_file', help='Input HDF5 file path')
     parser.add_argument('--output_file', help='Output HDF5 file path')
-    parser.add_argument('--labels_file', default=None, help='Labels file path with demos to remove')
-    parser.add_argument('--goal', choices=['remove_backending_labels', 'keep_frontstarting_angle', 'keep_frontstarting_labels'], required=True, 
-                        help='Goal for filtering demos: remove backending or keep frontstarting')
+    # parser.add_argument('--labels_file', default=None, help='Labels file path with demos to remove')
+    # parser.add_argument('--goal', choices=['remove_backending_labels', 'keep_frontstarting_angle', 'keep_frontstarting_labels'], required=True, 
+                        # help='Goal for filtering demos: remove backending or keep frontstarting')
     
     args = parser.parse_args()
     
@@ -152,12 +161,12 @@ if __name__ == "__main__":
     print(f"Filtering demos from: {args.input_file}")
     print(f"Output file: {args.output_file}")
 
-    demos_to_remove = get_demos_to_remove(args.labels_file, args.input_file, args.goal)
+    # demos_to_remove = get_demos_to_remove(args.labels_file, args.input_file, args.goal)
 
-    print(f"Demos to remove: {demos_to_remove}")
+    # print(f"Demos to remove: {demos_to_remove}")
     
     try:
-        filter_demos(args.input_file, args.output_file, demos_to_remove)
+        filter_demos(args.input_file, args.output_file)
         print("Filtering completed successfully!")
             
     except Exception as e:

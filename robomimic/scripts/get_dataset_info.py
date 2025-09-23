@@ -138,22 +138,30 @@ if __name__ == "__main__":
         total_1s = 0
         total_2s = 0
         total_0s = 0
+        total_8s = 0
+        total_9s = 0
         for ep in demos:
-            print("episode {} with {} transitions".format(ep, f["data/{}".format(ep)].attrs["num_samples"]))
+            # print("episode {} with {} transitions".format(ep, f["data/{}".format(ep)].attrs["num_samples"]))
             label = f["data/{}".format(ep)].attrs["label"]
-            print("label: {}".format(label))
+            # print("label: {}".format(label))
             if label == 1:
                 total_1s += 1
             elif label == 2:
                 total_2s += 1
             elif label == 0:
                 total_0s += 1
+            elif label == 8:
+                total_8s += 1
+            elif label == 9:
+                total_9s += 1
             else:
                 print("unknown label {}".format(label))
 
         print("total 1s: {}".format(total_1s))
         print("total 2s: {}".format(total_2s))
         print("total 0s: {}".format(total_0s))
+        print("total 8s: {}".format(total_8s))
+        print("total 9s: {}".format(total_9s))
 
 
     f.close()

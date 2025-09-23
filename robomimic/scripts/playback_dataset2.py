@@ -81,7 +81,7 @@ from robomimic.envs.env_base import EnvBase, EnvType
 
 # Define default cameras to use for each env type
 DEFAULT_CAMERAS = {
-    EnvType.ROBOSUITE_TYPE: ["agentview"],
+    EnvType.ROBOSUITE_TYPE: ["agentview_image"],
     EnvType.IG_MOMART_TYPE: ["rgb"],
     EnvType.GYM_TYPE: ValueError("No camera names supported for gym type env!"),
 }
@@ -159,7 +159,7 @@ def playback_trajectory_with_env(
                     # add demo number to the video frame
                     video_img = cv2.putText(
                         video_img, 
-                        "Demo {}".format(demo_num), 
+                        "{},{}".format(demo_num, i), 
                         (10, 30), 
                         cv2.FONT_HERSHEY_SIMPLEX, 
                         1, 
@@ -181,6 +181,7 @@ def playback_trajectory_with_obs(
     image_names=None,
     depth_names=None,
     first=False,
+    demo_num=None,
 ):
     """
     This function reads all "rgb" (and possibly "depth") observations in the dataset trajectory and
@@ -210,6 +211,18 @@ def playback_trajectory_with_obs(
             im = [traj_grp["obs/{}".format(k)][i] for k in image_names]
             depth = [depth_to_rgb(traj_grp["obs/{}".format(k)][i], depth_min=depth_min[k], depth_max=depth_max[k]) for k in depth_names] if depth_names is not None else []
             frame = np.concatenate(im + depth, axis=1)
+            if demo_num is not None:
+                # add demo number to the video frame
+                frame = cv2.putText(
+                    frame, 
+                    "{},{}".format(demo_num, i), 
+                    (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, 
+                    (255, 255, 255), 
+                    2, 
+                    cv2.LINE_AA,
+                )
             video_writer.append_data(frame)
         video_count += 1
 
@@ -280,11 +293,19 @@ def playback_dataset(args):
     # maybe dump video
     video_writer = None
     if write_video:
-        video_writer = imageio.get_writer(args.video_path, fps=20)
+        video_writer = imageio.get_writer(args.video_path, fps=5)
 
     for ind in range(len(demos)):
         ep = demos[ind]
         print("Playing back episode: {}".format(ep))
+
+        last_elements = f['data'][ep]['actions'][:, -1]  # Get last element of each sublist
+        # print(last_elements)
+        switch_indices = np.where((last_elements[:-1] - last_elements[1:] <= -1.25))[0]
+        if len(switch_indices) == 0:
+            print(last_elements)
+        first_switch_index = switch_indices[0] + 1
+        print('grasp index', first_switch_index)
 
         if args.use_obs:
             playback_trajectory_with_obs(
@@ -294,6 +315,7 @@ def playback_dataset(args):
                 image_names=args.render_image_names,
                 depth_names=args.render_depth_names,
                 first=args.first,
+                demo_num=ind if args.label_demos else None,
             )
             continue
 
@@ -382,7 +404,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--video_skip",
         type=int,
-        default=5,
+        default=1,
         help="render frames to video every n steps",
     )
 
